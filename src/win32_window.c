@@ -899,7 +899,7 @@ static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
             window->win32.lastCursorPosX = x;
             window->win32.lastCursorPosY = y;
 
-            //return 0;
+            return 0;
         }
 
         case WM_MOUSELEAVE:
@@ -2168,61 +2168,120 @@ processRawInput(void)
                 PostMessage(window->win32.handle, WM_MOUSEMOVE, keyFlags, lParam);
             }
 
-            // Insert legacy mouse button events into message queue
+            // Instead of reposting the events, we duplicate the button events' handlers here.
+            
+
+            
             USHORT buttonFlags = data->data.mouse.usButtonFlags;
             HWND hwnd = window->win32.handle;
             
             // Get current cursor position for lParam
-            POINT cursorPos;
+            /*POINT cursorPos;
             GetCursorPos(&cursorPos);
             ScreenToClient(hwnd, &cursorPos);
             LPARAM lParam = MAKELPARAM(cursorPos.x, cursorPos.y);
             
             // Get current key modifiers for wParam
             WPARAM keyFlags = 0;
-            if (GetKeyState(VK_CONTROL) & 0x8000) keyFlags |= MK_CONTROL;
-            if (GetKeyState(VK_SHIFT) & 0x8000) keyFlags |= MK_SHIFT;
-            if (GetKeyState(VK_LBUTTON) & 0x8000) keyFlags |= MK_LBUTTON;
-            if (GetKeyState(VK_RBUTTON) & 0x8000) keyFlags |= MK_RBUTTON;
-            if (GetKeyState(VK_MBUTTON) & 0x8000) keyFlags |= MK_MBUTTON;
-            if (GetKeyState(VK_XBUTTON1) & 0x8000) keyFlags |= MK_XBUTTON1;
-            if (GetKeyState(VK_XBUTTON2) & 0x8000) keyFlags |= MK_XBUTTON2;
-            
-            if (buttonFlags & RI_MOUSE_LEFT_BUTTON_DOWN)
-                PostMessage(hwnd, WM_LBUTTONDOWN, keyFlags | MK_LBUTTON, lParam);
-            if (buttonFlags & RI_MOUSE_LEFT_BUTTON_UP)
-                PostMessage(hwnd, WM_LBUTTONUP, keyFlags & ~MK_LBUTTON, lParam);
+            if (GetAsyncKeyState(VK_CONTROL) & 0x8000) keyFlags |= MK_CONTROL;
+            if (GetAsyncKeyState(VK_SHIFT) & 0x8000) keyFlags |= MK_SHIFT;
+            if (GetAsyncKeyState(VK_LBUTTON) & 0x8000) keyFlags |= MK_LBUTTON;
+            if (GetAsyncKeyState(VK_RBUTTON) & 0x8000) keyFlags |= MK_RBUTTON;
+            if (GetAsyncKeyState(VK_MBUTTON) & 0x8000) keyFlags |= MK_MBUTTON;
+            if (GetAsyncKeyState(VK_XBUTTON1) & 0x8000) keyFlags |= MK_XBUTTON1;
+            if (GetAsyncKeyState(VK_XBUTTON2) & 0x8000) keyFlags |= MK_XBUTTON2;*/
+
+            // if any down or up button (anything except RI_MOUSE_WHEEL or RI_MOUSE_HWHEEL), process
+            if (buttonFlags & 0xFFFF & ~(RI_MOUSE_WHEEL | RI_MOUSE_HWHEEL))
+            {
+                int i, button = -1, action = -1;
                 
-            if (buttonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN)
-                PostMessage(hwnd, WM_RBUTTONDOWN, keyFlags | MK_RBUTTON, lParam);
-            if (buttonFlags & RI_MOUSE_RIGHT_BUTTON_UP)
-                PostMessage(hwnd, WM_RBUTTONUP, keyFlags & ~MK_RBUTTON, lParam);
+                if (buttonFlags & RI_MOUSE_LEFT_BUTTON_DOWN)
+                {
+                    button = GLFW_MOUSE_BUTTON_LEFT;
+                    action = GLFW_PRESS;
+                }
+
+                if (buttonFlags & RI_MOUSE_LEFT_BUTTON_UP)
+                {
+                    button = GLFW_MOUSE_BUTTON_LEFT;
+                    action = GLFW_RELEASE;
+                }
+                    
+                if (buttonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN)
+                {
+                    button = GLFW_MOUSE_BUTTON_RIGHT;
+                    action = GLFW_PRESS;
+                }
+                if (buttonFlags & RI_MOUSE_RIGHT_BUTTON_UP)
+                {
+                    button = GLFW_MOUSE_BUTTON_RIGHT;
+                    action = GLFW_RELEASE;
+                }
+                    
+                if (buttonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN)
+                {
+                    button = GLFW_MOUSE_BUTTON_MIDDLE;
+                    action = GLFW_PRESS;
+                }
+                if (buttonFlags & RI_MOUSE_MIDDLE_BUTTON_UP)
+                {
+                    button = GLFW_MOUSE_BUTTON_MIDDLE;
+                    action = GLFW_RELEASE;
+                }
+                    
+                if (buttonFlags & RI_MOUSE_BUTTON_4_DOWN)
+                {
+                    button = GLFW_MOUSE_BUTTON_4;
+                    action = GLFW_PRESS;
+                }
+                if (buttonFlags & RI_MOUSE_BUTTON_4_UP)
+                {
+                    button = GLFW_MOUSE_BUTTON_4;
+                    action = GLFW_RELEASE;
+                }
+                    
+                if (buttonFlags & RI_MOUSE_BUTTON_5_DOWN)
+                {
+                    button = GLFW_MOUSE_BUTTON_5;
+                    action = GLFW_PRESS;
+                }
+                if (buttonFlags & RI_MOUSE_BUTTON_5_UP)
+                {
+                    button = GLFW_MOUSE_BUTTON_5;
+                    action = GLFW_RELEASE;
+                }
+
+                for (i = 0;  i <= GLFW_MOUSE_BUTTON_LAST;  i++)
+                {
+                    if (window->mouseButtons[i] == GLFW_PRESS)
+                        break;
+                }
+
+                if (i > GLFW_MOUSE_BUTTON_LAST)
+                    SetCapture(hwnd);
                 
-            if (buttonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN)
-                PostMessage(hwnd, WM_MBUTTONDOWN, keyFlags | MK_MBUTTON, lParam);
-            if (buttonFlags & RI_MOUSE_MIDDLE_BUTTON_UP)
-                PostMessage(hwnd, WM_MBUTTONUP, keyFlags & ~MK_MBUTTON, lParam);
-                
-            if (buttonFlags & RI_MOUSE_BUTTON_4_DOWN)
-                PostMessage(hwnd, WM_XBUTTONDOWN, MAKEWPARAM(keyFlags | MK_XBUTTON1, XBUTTON1), lParam);
-            if (buttonFlags & RI_MOUSE_BUTTON_4_UP)
-                PostMessage(hwnd, WM_XBUTTONUP, MAKEWPARAM(keyFlags & ~MK_XBUTTON1, XBUTTON1), lParam);
-                
-            if (buttonFlags & RI_MOUSE_BUTTON_5_DOWN)
-                PostMessage(hwnd, WM_XBUTTONDOWN, MAKEWPARAM(keyFlags | MK_XBUTTON2, XBUTTON2), lParam);
-            if (buttonFlags & RI_MOUSE_BUTTON_5_UP)
-                PostMessage(hwnd, WM_XBUTTONUP, MAKEWPARAM(keyFlags & ~MK_XBUTTON2, XBUTTON2), lParam);
-                
+                _glfwInputMouseClick(window, button, action, getKeyMods());
+
+                for (i = 0;  i <= GLFW_MOUSE_BUTTON_LAST;  i++)
+                {
+                    if (window->mouseButtons[i] == GLFW_PRESS)
+                        break;
+                }
+
+                if (i > GLFW_MOUSE_BUTTON_LAST)
+                    ReleaseCapture();
+            }
             // Handle mouse wheel events
             if (buttonFlags & RI_MOUSE_WHEEL)
             {
                 SHORT wheelDelta = (SHORT)data->data.mouse.usButtonData;
-                PostMessage(hwnd, WM_MOUSEWHEEL, MAKEWPARAM(keyFlags, wheelDelta), lParam);
+                _glfwInputScroll(window, 0.0, wheelDelta / (double) WHEEL_DELTA);
             }
             if (buttonFlags & RI_MOUSE_HWHEEL)
             {
                 SHORT wheelDelta = (SHORT)data->data.mouse.usButtonData;
-                PostMessage(hwnd, WM_MOUSEHWHEEL, MAKEWPARAM(keyFlags, wheelDelta), lParam);
+                _glfwInputScroll(window, -wheelDelta / (double) WHEEL_DELTA, 0.0);
             }
         }
 
@@ -2302,7 +2361,8 @@ void _glfwPollEventsWin32(void)
     }
 
     window = _glfw.win32.disabledCursorWindow;
-    if (window)
+    // Disable with raw mouse motion because that reports dx/dy directly
+    if (window && !window->rawMouseMotion)
     {
         int width, height;
         _glfwGetWindowSizeWin32(window, &width, &height);
