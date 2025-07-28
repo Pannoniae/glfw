@@ -2240,7 +2240,7 @@ void _glfwPollEventsWin32(void)
 
     processRawInput(); // this does the whole `GetRawInputBuffer` thing
 
-    while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE) && count < 5)
+    while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
     {
         
         if (msg.message == WM_QUIT)
@@ -2261,7 +2261,6 @@ void _glfwPollEventsWin32(void)
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
-        count++;
     }
 
     // HACK: Release modifier keys that the system did not emit KEYUP for
