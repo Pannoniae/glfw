@@ -35,6 +35,14 @@
 #include <assert.h>
 #include <windowsx.h>
 #include <shellapi.h>
+#include <BaseTsd.h>
+#include <stdio.h>
+
+
+#ifdef _WIN64
+typedef UINT64 QWORD; // Needed for NEXTRAWINPUTBLOCK()
+#endif
+
 
 // Returns the window style for the specified window
 //
@@ -265,7 +273,7 @@ static void releaseCursor(void)
 //
 static void enableRawMouseMotion(_GLFWwindow* window)
 {
-    const RAWINPUTDEVICE rid = { 0x01, 0x02, 0, window->win32.handle };
+    const RAWINPUTDEVICE rid = { 0x01, 0x02, RIDEV_NOLEGACY, window->win32.handle };
 
     if (!RegisterRawInputDevices(&rid, 1, sizeof(rid)))
     {
@@ -891,78 +899,7 @@ static LRESULT CALLBACK windowProc(HWND hWnd, UINT uMsg, WPARAM wParam, LPARAM l
             window->win32.lastCursorPosX = x;
             window->win32.lastCursorPosY = y;
 
-            return 0;
-        }
-
-        case WM_INPUT:
-        {
-            UINT size = 0;
-            HRAWINPUT ri = (HRAWINPUT) lParam;
-            RAWINPUT* data = NULL;
-            int dx, dy;
-
-            if (_glfw.win32.disabledCursorWindow != window)
-                break;
-            if (!window->rawMouseMotion)
-                break;
-
-            GetRawInputData(ri, RID_INPUT, NULL, &size, sizeof(RAWINPUTHEADER));
-            if (size > (UINT) _glfw.win32.rawInputSize)
-            {
-                _glfw_free(_glfw.win32.rawInput);
-                _glfw.win32.rawInput = _glfw_calloc(size, 1);
-                _glfw.win32.rawInputSize = size;
-            }
-
-            size = _glfw.win32.rawInputSize;
-            if (GetRawInputData(ri, RID_INPUT,
-                                _glfw.win32.rawInput, &size,
-                                sizeof(RAWINPUTHEADER)) == (UINT) -1)
-            {
-                _glfwInputError(GLFW_PLATFORM_ERROR,
-                                "Win32: Failed to retrieve raw input data");
-                break;
-            }
-
-            data = _glfw.win32.rawInput;
-            if (data->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)
-            {
-                POINT pos = {0};
-                int width, height;
-
-                if (data->data.mouse.usFlags & MOUSE_VIRTUAL_DESKTOP)
-                {
-                    pos.x += GetSystemMetrics(SM_XVIRTUALSCREEN);
-                    pos.y += GetSystemMetrics(SM_YVIRTUALSCREEN);
-                    width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
-                    height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
-                }
-                else
-                {
-                    width = GetSystemMetrics(SM_CXSCREEN);
-                    height = GetSystemMetrics(SM_CYSCREEN);
-                }
-
-                pos.x += (int) ((data->data.mouse.lLastX / 65535.f) * width);
-                pos.y += (int) ((data->data.mouse.lLastY / 65535.f) * height);
-                ScreenToClient(window->win32.handle, &pos);
-
-                dx = pos.x - window->win32.lastCursorPosX;
-                dy = pos.y - window->win32.lastCursorPosY;
-            }
-            else
-            {
-                dx = data->data.mouse.lLastX;
-                dy = data->data.mouse.lLastY;
-            }
-
-            _glfwInputCursorPos(window,
-                                window->virtualCursorPosX + dx,
-                                window->virtualCursorPosY + dy);
-
-            window->win32.lastCursorPosX += dx;
-            window->win32.lastCursorPosY += dy;
-            break;
+            //return 0;
         }
 
         case WM_MOUSELEAVE:
@@ -2086,14 +2023,226 @@ GLFWbool _glfwRawMouseMotionSupportedWin32(void)
     return GLFW_TRUE;
 }
 
+bool _hasNotInput(MSG* msg, _GLFWwindow* window)
+{
+
+    // if not focused, process all
+    if(true || !_glfwWindowFocusedWin32(window)) {
+        return PeekMessage(msg, NULL, 0, 0, PM_REMOVE);
+    }
+
+    // there's two cases. we either have raw input enabled or not. if raw input is enabled, we don't need to bother with VM_MOUSEMOVE events.
+    // if raw input is disabled, we process those too.
+    
+    /*if (window->rawMouseMotion && false)
+    {
+        // path without WM_INPUT and WM_MOUSEMOVE
+        BOOL ret = PeekMessage(msg, NULL, 0, WM_INPUT - 1, PM_REMOVE);
+        if (!ret) {
+            // get from WM_INPUT until WM_MOUSEMOVE
+            ret = PeekMessage(msg, NULL, WM_INPUT + 1, WM_MOUSEMOVE - 1, PM_REMOVE);
+            // get from WM_MOUSEMOVE until UINT32_MAX
+            ret = PeekMessage(msg, NULL, WM_MOUSEMOVE + 1, UINT32_MAX, PM_REMOVE);
+        }
+        return ret;
+    }*/
+    // process up to WM_INPUT
+    BOOL ret = PeekMessage(msg, NULL, 0, WM_INPUT - 1, PM_REMOVE);
+    if (!ret) {
+        ret = PeekMessage(msg, NULL, WM_INPUT + 1, UINT32_MAX, PM_REMOVE);
+    }
+    return ret;
+}
+
+void
+processRawInput(void)
+{
+    UINT size = 0;
+    UINT riSize = 0;
+    _GLFWwindow* window = _glfw.windowListHead;
+
+    if (_glfw.win32.disabledCursorWindow != window)
+        return;
+    if (!window->rawMouseMotion)
+        return;
+
+    // get the size of the raw input buffer
+    UINT result = GetRawInputBuffer(NULL, &riSize, sizeof(RAWINPUTHEADER));
+    if (result == (UINT)-1)
+    {
+        _glfwInputError(GLFW_PLATFORM_ERROR,
+                        "Win32: Failed to retrieve raw input buffer size");
+        return;
+    }
+
+    UINT byteCount = riSize * 16;
+
+    if (byteCount > (UINT)_glfw.win32.rawInputSize)
+    {
+        _glfw_free(_glfw.win32.rawInput);
+        _glfw.win32.rawInput = _glfw_calloc(byteCount, 1);
+        _glfw.win32.rawInputSize = byteCount;
+    }
+
+    // read it (actually) this time into the buffer
+    size = _glfw.win32.rawInputSize;
+    result = GetRawInputBuffer(_glfw.win32.rawInput, &size, sizeof(RAWINPUTHEADER));
+    if (result == (UINT)-1)
+    {
+        _glfwInputError(GLFW_PLATFORM_ERROR,
+                        "Win32: Failed to retrieve raw input buffer");
+        _glfw_free(_glfw.win32.rawInput);
+        return;
+    }
+
+    // print msg count
+    //printf("raw input count: %u\n", result);
+
+    UINT riCount = result;
+
+    RAWINPUT* data = _glfw.win32.rawInput;
+
+    for (unsigned int i = 0; i < riCount; ++i)
+    {
+        if (data->header.dwType == RIM_TYPEMOUSE) {
+            int dx = 0, dy = 0;
+            
+            if (data->data.mouse.usFlags & MOUSE_MOVE_ABSOLUTE)
+            {
+                POINT pos = {0};
+                int width, height;
+
+                if (data->data.mouse.usFlags & MOUSE_VIRTUAL_DESKTOP)
+                {
+                    pos.x += GetSystemMetrics(SM_XVIRTUALSCREEN);
+                    pos.y += GetSystemMetrics(SM_YVIRTUALSCREEN);
+                    width = GetSystemMetrics(SM_CXVIRTUALSCREEN);
+                    height = GetSystemMetrics(SM_CYVIRTUALSCREEN);
+                }
+                else
+                {
+                    width = GetSystemMetrics(SM_CXSCREEN);
+                    height = GetSystemMetrics(SM_CYSCREEN);
+                }
+
+                pos.x += (int)((data->data.mouse.lLastX / 65535.f) * width);
+                pos.y += (int)((data->data.mouse.lLastY / 65535.f) * height);
+                ScreenToClient(window->win32.handle, &pos);
+
+                dx = pos.x - window->win32.lastCursorPosX;
+                dy = pos.y - window->win32.lastCursorPosY;
+            }
+            else
+            {
+                if (data->data.mouse.lLastX || data->data.mouse.lLastY)
+                {
+                    dx = data->data.mouse.lLastX;
+                    dy = data->data.mouse.lLastY;
+                }
+            }
+
+            if (dx != 0 || dy != 0)
+            {
+                _glfwInputCursorPos(window,
+                                    window->virtualCursorPosX + dx,
+                                    window->virtualCursorPosY + dy);
+
+                window->win32.lastCursorPosX += dx;
+                window->win32.lastCursorPosY += dy;
+                
+                // Generate WM_MOUSEMOVE event
+                POINT cursorPos;
+                GetCursorPos(&cursorPos);
+                ScreenToClient(window->win32.handle, &cursorPos);
+                LPARAM lParam = MAKELPARAM(cursorPos.x, cursorPos.y);
+                
+                WPARAM keyFlags = 0;
+                if (GetKeyState(VK_CONTROL) & 0x8000) keyFlags |= MK_CONTROL;
+                if (GetKeyState(VK_SHIFT) & 0x8000) keyFlags |= MK_SHIFT;
+                if (GetKeyState(VK_LBUTTON) & 0x8000) keyFlags |= MK_LBUTTON;
+                if (GetKeyState(VK_RBUTTON) & 0x8000) keyFlags |= MK_RBUTTON;
+                if (GetKeyState(VK_MBUTTON) & 0x8000) keyFlags |= MK_MBUTTON;
+                if (GetKeyState(VK_XBUTTON1) & 0x8000) keyFlags |= MK_XBUTTON1;
+                if (GetKeyState(VK_XBUTTON2) & 0x8000) keyFlags |= MK_XBUTTON2;
+                
+                PostMessage(window->win32.handle, WM_MOUSEMOVE, keyFlags, lParam);
+            }
+
+            // Insert legacy mouse button events into message queue
+            USHORT buttonFlags = data->data.mouse.usButtonFlags;
+            HWND hwnd = window->win32.handle;
+            
+            // Get current cursor position for lParam
+            POINT cursorPos;
+            GetCursorPos(&cursorPos);
+            ScreenToClient(hwnd, &cursorPos);
+            LPARAM lParam = MAKELPARAM(cursorPos.x, cursorPos.y);
+            
+            // Get current key modifiers for wParam
+            WPARAM keyFlags = 0;
+            if (GetKeyState(VK_CONTROL) & 0x8000) keyFlags |= MK_CONTROL;
+            if (GetKeyState(VK_SHIFT) & 0x8000) keyFlags |= MK_SHIFT;
+            if (GetKeyState(VK_LBUTTON) & 0x8000) keyFlags |= MK_LBUTTON;
+            if (GetKeyState(VK_RBUTTON) & 0x8000) keyFlags |= MK_RBUTTON;
+            if (GetKeyState(VK_MBUTTON) & 0x8000) keyFlags |= MK_MBUTTON;
+            if (GetKeyState(VK_XBUTTON1) & 0x8000) keyFlags |= MK_XBUTTON1;
+            if (GetKeyState(VK_XBUTTON2) & 0x8000) keyFlags |= MK_XBUTTON2;
+            
+            if (buttonFlags & RI_MOUSE_LEFT_BUTTON_DOWN)
+                PostMessage(hwnd, WM_LBUTTONDOWN, keyFlags | MK_LBUTTON, lParam);
+            if (buttonFlags & RI_MOUSE_LEFT_BUTTON_UP)
+                PostMessage(hwnd, WM_LBUTTONUP, keyFlags & ~MK_LBUTTON, lParam);
+                
+            if (buttonFlags & RI_MOUSE_RIGHT_BUTTON_DOWN)
+                PostMessage(hwnd, WM_RBUTTONDOWN, keyFlags | MK_RBUTTON, lParam);
+            if (buttonFlags & RI_MOUSE_RIGHT_BUTTON_UP)
+                PostMessage(hwnd, WM_RBUTTONUP, keyFlags & ~MK_RBUTTON, lParam);
+                
+            if (buttonFlags & RI_MOUSE_MIDDLE_BUTTON_DOWN)
+                PostMessage(hwnd, WM_MBUTTONDOWN, keyFlags | MK_MBUTTON, lParam);
+            if (buttonFlags & RI_MOUSE_MIDDLE_BUTTON_UP)
+                PostMessage(hwnd, WM_MBUTTONUP, keyFlags & ~MK_MBUTTON, lParam);
+                
+            if (buttonFlags & RI_MOUSE_BUTTON_4_DOWN)
+                PostMessage(hwnd, WM_XBUTTONDOWN, MAKEWPARAM(keyFlags | MK_XBUTTON1, XBUTTON1), lParam);
+            if (buttonFlags & RI_MOUSE_BUTTON_4_UP)
+                PostMessage(hwnd, WM_XBUTTONUP, MAKEWPARAM(keyFlags & ~MK_XBUTTON1, XBUTTON1), lParam);
+                
+            if (buttonFlags & RI_MOUSE_BUTTON_5_DOWN)
+                PostMessage(hwnd, WM_XBUTTONDOWN, MAKEWPARAM(keyFlags | MK_XBUTTON2, XBUTTON2), lParam);
+            if (buttonFlags & RI_MOUSE_BUTTON_5_UP)
+                PostMessage(hwnd, WM_XBUTTONUP, MAKEWPARAM(keyFlags & ~MK_XBUTTON2, XBUTTON2), lParam);
+                
+            // Handle mouse wheel events
+            if (buttonFlags & RI_MOUSE_WHEEL)
+            {
+                SHORT wheelDelta = (SHORT)data->data.mouse.usButtonData;
+                PostMessage(hwnd, WM_MOUSEWHEEL, MAKEWPARAM(keyFlags, wheelDelta), lParam);
+            }
+            if (buttonFlags & RI_MOUSE_HWHEEL)
+            {
+                SHORT wheelDelta = (SHORT)data->data.mouse.usButtonData;
+                PostMessage(hwnd, WM_MOUSEHWHEEL, MAKEWPARAM(keyFlags, wheelDelta), lParam);
+            }
+        }
+
+        data = NEXTRAWINPUTBLOCK(data);
+    }
+}
+
 void _glfwPollEventsWin32(void)
 {
     MSG msg;
     HWND handle;
-    _GLFWwindow* window;
+    _GLFWwindow* window = _glfw.windowListHead;
 
-    while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
+    UINT count = 0;
+
+    processRawInput(); // this does the whole `GetRawInputBuffer` thing
+
+    while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE) && count < 5)
     {
+        
         if (msg.message == WM_QUIT)
         {
             // NOTE: While GLFW does not itself post WM_QUIT, other processes
@@ -2112,6 +2261,7 @@ void _glfwPollEventsWin32(void)
             TranslateMessage(&msg);
             DispatchMessageW(&msg);
         }
+        count++;
     }
 
     // HACK: Release modifier keys that the system did not emit KEYUP for

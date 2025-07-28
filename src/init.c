@@ -385,6 +385,11 @@ void _glfwInputError(int code, const char* format, ...)
 
 GLFWAPI int glfwInit(void)
 {
+
+    // print message about being a fork!
+    printf("You are using a GLFW raw input patch. This is not the official GLFW library.\n");
+    fflush(stdout);
+    
     if (_glfw.initialized)
         return GLFW_TRUE;
 
