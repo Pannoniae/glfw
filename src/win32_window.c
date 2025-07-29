@@ -2959,8 +2959,8 @@ void _glfwPollEventsWin32(void)
     while (PeekMessageW(&msg, NULL, 0, 0, PM_REMOVE))
     {
         // print message type (for debugging)
-        printf("WM: %s\n", id2str_impl(msg.message));
-        fflush(stdout);
+        //printf("WM: %s\n", id2str_impl(msg.message));
+        //fflush(stdout);
         
         if (msg.message == WM_QUIT)
         {
